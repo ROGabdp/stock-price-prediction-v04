@@ -9,13 +9,23 @@ Git 預設分支名稱設定為 main。
 
 /speckit.specify
 
-此模型旨在預測台股未來 $20$ 個交易日的漲跌幅區間及其信心度，屬於多類別時間序列分類任務。
+以下提供資訊為MD格式。
 
-1. 數據預處理與目標變數定義 (Label & Scaling)目標變數 (Y)：計算 $20$ 日報酬率 $R_{t \to t+20} = (\text{Close}_{t+20} - \text{Close}_t) / \text{Close}_t$。將 $R_{t \to t+20}$ 轉換為 $5$ 個類別的 $\text{One-Hot}$ 編碼向量（例如 $[0,0,0,0,1]$）。類別閾值 (以 $\sigma_{20} = 5\%$ 為例)：0 (極度下跌)： $R_{t \to t+20} < -5.0\%$1 (溫和下跌)： $-5.0\% \le R_{t \to t+20} < -2.5\%$2 (區間震盪)： $-2.5\% \le R_{t \to t+20} \le +2.5\%$3 (溫和上漲)： $+2.5\% < R_{t \to t+20} \le +5.0\%$4 (極度上漲)： $R_{t \to t+20} > +5.0\%$數據縮放 (Scaling)： 對所有輸入特徵使用 $\text{MinMaxScaler}$ 或 $\text{StandardScaler}$ 進行標準化/正規化。2. 輸入特徵與時間窗口 (Input Features & Time Steps)輸入時間窗口 ($T_{in}$)： 採用 $T_{in} = \mathbf{60}$ 天（回顧過去約三個月的數據）。特徵工程 (Feature Engineering)：將價格類特徵 (如 open, close) 轉換為日報酬率。納入所有技術指標 (DIF12-26, MACD9, OSC, K(9,3), D(9,3))。納入法人籌碼 (net buy sell, cumulative net buy sell)，考慮使用籌碼的變化率。3. LSTM 模型架構與訓練 (Architecture & Training)模型類型： 3 層 Stacked LSTMLSTM 層配置 (需設置 $\text{return\_sequences=True}$)：$\text{LSTM Layer 1}$: $\mathbf{128}$ 單元$\text{LSTM Layer 2}$: $\mathbf{64}$ 單元$\text{LSTM Layer 3}$: $\mathbf{32}$ 單元 ($\text{return\_sequences=False}$)正則化 (Regularization)： 在各 $\text{LSTM}$ 層之間加入 $\text{Dropout}(\mathbf{0.2})$ 層。輸出層： $\text{Dense}(\mathbf{5}, \text{activation='softmax'})$損失函數： $\text{Categorical Cross-Entropy}$優化器： $\text{Adam}$ (建議 $\text{Learning Rate}$ 初始值為 $\mathbf{10^{-3}}$)訓練控制： 採用 $\text{Early Stopping}$ 監控 $\text{Validation Loss}$ ($\text{Patience}=10$ 左右)。4. 結果輸出與信心度解讀預測輸出： 模型輸出 $5$ 維的機率向量。漲跌幅區間： 機率最高的維度即為預測的區間類別 (0 到 4)。信心度： 機率最高的數值即為模型對該區間的預測信心度。
+此模型旨在預測台股未來 $20$ 個交易日的漲跌幅區間及其信心度，屬於多類別時間序列分類任務。歷史資料來源為根目錄的19980601-20251111-converted.csv。
+
+1. 數據預處理與目標變數定義 (Label & Scaling)目標變數 (Y)：計算 $20$ 日報酬率 $R_{t \to t+20} = (\text{Close}_{t+20} - \text{Close}_t) / \text{Close}_t$。將 $R_{t \to t+20}$ 轉換為 $5$ 個類別的 $\text{One-Hot}$ 編碼向量（例如 $[0,0,0,0,1]$）。類別閾值 (以 $\sigma_{20} = 5\%$ 為例)：0 (極度下跌)： $R_{t \to t+20} < -5.0\%$1 (溫和下跌)： $-5.0\% \le R_{t \to t+20} < -2.5\%$2 (區間震盪)： $-2.5\% \le R_{t \to t+20} \le +2.5\%$3 (溫和上漲)： $+2.5\% < R_{t \to t+20} \le +5.0\%$4 (極度上漲)： $R_{t \to t+20} > +5.0\%$數據縮放 (Scaling)： 對所有輸入特徵使用 $\text{MinMaxScaler}$ 或 $\text{StandardScaler}$ 進行標準化/正規化。2. 輸入特徵與時間窗口 (Input Features & Time Steps)輸入時間窗口 ($T_{in}$)： 採用 $T_{in} = \mathbf{60}$ 天（回顧過去約三個月的數據）。特徵工程 (Feature Engineering)：將價格類特徵 (如 open, close) 轉換為日報酬率。納入所有技術指標 (DIF12-26, MACD9, OSC, K(9,3), D(9,3))。納入法人籌碼 (net buy sell, cumulative net buy sell)，考慮使用籌碼的變化率。移動平均線，採用 長短期 MA 的差距或斜率，例如 $\text{SMA20}/\text{SMA60}$ 的比值，或 $\text{SMA20}$ 的每日斜率。這些更能反映長期動能。3. LSTM 模型架構與訓練 (Architecture & Training)模型類型： 3 層 Stacked LSTMLSTM 層配置 (需設置 $\text{return\_sequences=True}$)：$\text{LSTM Layer 1}$: $\mathbf{128}$ 單元$\text{LSTM Layer 2}$: $\mathbf{64}$ 單元$\text{LSTM Layer 3}$: $\mathbf{32}$ 單元 ($\text{return\_sequences=False}$)正則化 (Regularization)： 在各 $\text{LSTM}$ 層之間加入 $\text{Dropout}(\mathbf{0.2})$ 層。輸出層： $\text{Dense}(\mathbf{5}, \text{activation='softmax'})$損失函數： $\text{Categorical Cross-Entropy}$優化器： $\text{Adam}$ (建議 $\text{Learning Rate}$ 初始值為 $\mathbf{10^{-3}}$)訓練控制： 採用 $\text{Early Stopping}$ 監控 $\text{Validation Loss}$ ($\text{Patience}=10$ 左右)。4. 結果輸出與信心度解讀預測輸出： 模型輸出 $5$ 維的機率向量。漲跌幅區間： 機率最高的維度即為預測的區間類別 (0 到 4)。信心度： 機率最高的數值即為模型對該區間的預測信心度。
 
 先用前面的建議作為起點 (Baseline Model)。
 
 接著，使用 $\text{Keras Tuner}$ 或 $\text{Optuna}$ 執行自動超參數調整。自動調整的目的是系統性地探索不同的參數組合，找出能最小化驗證損失（Validation Loss）的那一組設定。以下是你在進行自動調整時，應該作為變量納入探索的關鍵參數(Search Space)：輸入時間窗口 ($T_{in}$): $\{20, 40, 60, 80\}$$\text{LSTM}$ 層數: $\{2, 3, 4\}$每層 $\text{LSTM}$ 單元數 (Unit Size): $\{32, 64, 128\}$ (應允許每層單元數遞減，例如 $128 \rightarrow 64 \rightarrow 32$)$\text{Dropout}$ Rate: $[0.1, 0.4]$學習率 ($\text{Learning Rate}$): $\{10^{-3}, 5 \times 10^{-4}, 10^{-4}\}$批次大小 ($\text{Batch Size}$): $\{32, 64, 128\}$
+
+「超參數探索範圍 (Search Space)」**的新增項目：新增指令：特徵集選擇 (Feature Set Selection)必須將特徵集的選擇納入超參數調整範圍。新增超參數： $\text{Feature\_Set\_ID}$探索範圍： $\{\text{Set A}, \text{Set B}, \text{Set C}\}$實作要求： 程式設計師需要準備三組經過數據處理後的特徵矩陣，並讓自動優化工具選擇使用哪一組特徵來訓練模型。最終目標： 最佳模型將是以下所有參數組合後的冠軍：($\text{Time Step}, \text{Layer Size}, \text{Learning Rate}, \textbf{Feature\_Set\_ID}$)。
+
+Set A (動能型) 專注於中期趨勢與動能:僅包含價格變化率、Volume 變化率、$\text{SMA}$ 比例、$\text{MACD}$、法人籌碼。 (排除 KDJ, OSC 等震盪指標)
+
+Set B (震盪型)  專注於超買超賣反轉訊號: 包含價格變化率、Volume 變化率、$\text{SMA}$ 比例、$\text{K(9,3)}$、$\text{D(9,3)}$、法人籌碼。 (排除 MACD 等趨勢指標)
+
+Set C (全特徵集)  包含所有處理過的特徵: 所有可用的特徵。
 
 模型檔案儲存： 在整個超參數調整過程中，只將在驗證集上表現最佳 (Min Validation Loss) 的那一個模型檔案（例如 .h5 或 $\text{SavedModel}$ 格式）儲存下來。
 紀錄追蹤： 必須使用 $\text{Keras Tuner}$、$\text{Optuna}$ 或 $\text{MLflow}$ 等工具，完整紀錄所有試驗 (Trials) 的參數組合、最終驗證指標以及訓練日誌。這些紀錄應可供後續分析和模型選擇使用。
@@ -25,7 +35,159 @@ Git 預設分支名稱設定為 main。
 
 /speckit.plan
 
-使用Python撰寫程式
+使用Python 3.12.3 撰寫程式。
+GPU 環境配置清單整理為精確的條列式格式。
+
+這份清單涵蓋了作業系統、Python 環境、核心函式庫以及關鍵的軟體版本鎖定資訊，這些都是確保 TensorFlow 在 WSL2/Ubuntu 3.12 環境下成功啟用 NVIDIA GPU 的必要條件。
+
+✅ 成功 GPU 環境配置清單 (WSL2 / Python 3.12)
+1. 作業系統與硬體配置
+主機作業系統: Windows 10/11 (需安裝 WSL2)
+
+WSL2 發行版: Ubuntu 24.04 LTS (Noble Numbat)
+
+NVIDIA 驅動 (Windows): 581.80 或最新版本（主機驅動）
+
+CUDA Runtime (Windows): 13.0 (由 Windows 驅動提供)
+
+2. 系統級函式庫 (於 WSL2 內安裝)
+CUDA Toolkit (核心): 13.0.2-1
+
+安裝指令： 確保 APT 來源正確後執行 sudo apt install -y cuda nvidia-cudnn
+
+環境變數： 確保虛擬環境啟動腳本 (venv/bin/activate) 末尾已加入以下路徑：
+
+Bash
+
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/cuda/lib64:/usr/local/cuda/extras/CUPTI/lib64
+export PATH=$PATH:/usr/local/cuda/bin
+3. Python 虛擬環境與關鍵套件版本
+Python 版本： 3.12.3
+
+深度學習框架 (GPU 關鍵)： tensorflow[and-cuda] ==2.16.1
+
+註：必須使用 [and-cuda] 額外依賴項，並且精確鎖定此版本以與 Python 3.12 和 CUDA 13.0 兼容。
+
+超參數調整： keras-tuner ==1.4.6
+
+資料處理 (NumPy)： numpy ==1.26.2
+
+資料處理 (Pandas)： pandas ==2.1.4
+
+機器學習工具： scikit-learn ==1.3.2
+
+4. 驗證指令
+最終 GPU 驗證：
+
+Bash
+
+python -c "import tensorflow as tf; print('GPU 可用:', tf.config.list_physical_devices('GPU'))"
+預期結果： GPU 可用: [PhysicalDevice(name='/physical_device:GPU:0', device_type='GPU')]
 
 /speckit.tasks
 /speckit.implement
+
+
+
+
+> 接下來我如果有了新的資料，想要用不同的data 
+file進行預測，我是不是只要在預測指令內更換檔名即可，不需要重新訓練模型? 
+
+● 不完全正確。這要分兩種情況：
+
+  情況分析
+
+  ❌ 情況 1：新資料是「未來的新記錄」
+
+  如果你的新資料是增加了新的交易日記錄（例如從 20251111 更新到 20251130），那麼：
+
+  不能直接預測，必須重新訓練，因為：
+
+  1. 模型需要最新的序列資料：LSTM 模型使用滑動窗口（例如 60
+  天）來預測，如果資料更新了，模型需要用最新的 60 天資料來建立序列
+  2. Scaler 需要重新擬合：特徵縮放器是基於訓練資料的統計特性，新資料可能改變這些特性
+  3. 預測日期會改變：舊模型是基於舊資料訓練的，預測的基準日期已經過時
+
+  正確流程：
+  # 1. 重新訓練基準模型（使用新資料）
+  python src/cli/train.py \
+      --data-file 19980601-20251130-converted.csv \  # 新資料檔
+      --feature-set "Set A" \
+      --time-steps 60 \
+      --epochs 100 \
+      --batch-size 32 \
+      --model-name baseline_model
+
+  # 輸出：models/baseline_model_20251201_100000.h5
+
+  # 2. （可選）重新調整超參數
+  python src/cli/tune.py \
+      --data-file 19980601-20251130-converted.csv \
+      --max-trials 50 \
+      --baseline-model models/baseline_model_20251201_100000.h5 \
+      --overwrite  # ⚠️ 必須加上！
+
+  # 3. 使用新模型預測
+  python src/cli/predict.py \
+      --model-file models/baseline_model_20251201_100000.h5 \
+      --data-file 19980601-20251130-converted.csv \
+      --input-date "2025-11-30"
+
+  ✅ 情況 2：新資料是「同期間的不同股票/市場」
+
+  如果你的新資料是相同時間範圍但不同標的（例如從台積電換成鴻海），那麼：
+
+  不能直接用舊模型，因為：
+
+  1. 不同股票有不同特性：價格範圍、波動性、成交量都不同
+  2. Scaler 不適用：縮放器是針對特定股票訓練的
+  3. 模型學到的是特定股票的模式：LSTM 學習的是該股票的歷史走勢模式
+
+  必須重新訓練新模型。
+
+  ✅ 情況 3：相同資料，只是想預測不同日期
+
+  如果你的新資料檔案內容完全相同，只是：
+  - 檔名不同
+  - 或想預測不同的歷史日期
+
+  可以直接更換檔名預測：
+
+  # 假設你只是重新命名了檔案
+  python src/cli/predict.py \
+      --model-file models/best_tuned_model_20251116_153022.h5 \
+      --data-file new_filename.csv \  # 內容相同，只是檔名不同
+      --input-date "2024-06-15"  # 預測不同日期
+
+  總結
+
+  | 情況            | 是否需要重新訓練 | 原因                  |
+  |---------------|----------|---------------------|
+  | 資料增加新記錄（時間延長） | ✅ 需要     | 序列需要更新、Scaler 需重新擬合 |
+  | 不同股票/市場       | ✅ 需要     | 不同特性、模式完全不同         |
+  | 相同資料不同檔名      | ❌ 不需要    | 內容相同可直接使用           |
+  | 預測不同歷史日期      | ❌ 不需要    | 只要日期在資料範圍內即可        |
+
+
+
+
+
+
+
+  超參數優化中，中斷的方式
+
+    🎯 快速指令參考
+
+  # 1. 中斷訓練
+  Ctrl + C
+
+  # 2. 取得最佳模型
+  python get_best_from_tuner.py
+
+  # 3. 查看結果
+  cat models/best_tuned_setC_partial_*_config.json
+
+  # 4. 稍後繼續（會從中斷處繼續）
+  python tune_setC_only.py
+
+  現在執行 python get_best_from_tuner.py 就可以取得目前最佳的模型了！🚀
