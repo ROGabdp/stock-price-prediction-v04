@@ -325,7 +325,10 @@ def get_best_model(
 
 
 def save_tuner_results(
-    tuner: "kt.Tuner", stats: dict, output_file: str = "logs/tuning_results.txt"
+    tuner: "kt.Tuner",
+    stats: dict,
+    output_file: str = "logs/tuning_results.txt",
+    baseline_model_path: str = None,
 ) -> None:
     """
     儲存超參數調整結果至檔案
@@ -334,6 +337,7 @@ def save_tuner_results(
         tuner: 完成調整的 Keras Tuner 實例
         stats: run_tuning 回傳的統計資訊
         output_file: 輸出檔案路徑
+        baseline_model_path: 基準模型路徑（可選）
 
     Example:
         >>> save_tuner_results(tuner, stats, "logs/tuning_results.txt")
@@ -342,33 +346,155 @@ def save_tuner_results(
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(output_file, "w", encoding="utf-8") as f:
-        f.write("=" * 60 + "\n")
+        f.write("=" * 80 + "\n")
         f.write("超參數調整結果\n")
-        f.write("=" * 60 + "\n\n")
+        f.write("=" * 80 + "\n\n")
 
+        # 基本資訊
+        from datetime import datetime
+        f.write(f"調整時間: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        if baseline_model_path:
+            f.write(f"基準模型: {baseline_model_path}\n")
+        f.write("\n")
+
+        # 統計資訊
+        f.write("=" * 80 + "\n")
+        f.write("調整統計\n")
+        f.write("=" * 80 + "\n\n")
         f.write(f"總試驗次數: {stats['total_trials']}\n")
         f.write(f"總執行時間: {stats['total_time'] / 3600:.2f} 小時\n")
+        f.write(f"平均每次試驗時間: {stats['total_time'] / stats['total_trials'] / 60:.2f} 分鐘\n\n")
+
+        # 最佳結果
+        f.write("=" * 80 + "\n")
+        f.write("最佳模型效能\n")
+        f.write("=" * 80 + "\n\n")
         f.write(f"最佳驗證損失: {stats['best_val_loss']:.4f}\n")
         f.write(f"最佳驗證準確度: {stats['best_val_accuracy']:.2%}\n\n")
 
-        f.write("最佳超參數:\n")
+        # 最佳超參數
+        f.write("=" * 80 + "\n")
+        f.write("最佳超參數配置\n")
+        f.write("=" * 80 + "\n\n")
         for key, value in stats["best_hyperparameters"].items():
-            f.write(f"  - {key}: {value}\n")
+            f.write(f"  {key}: {value}\n")
 
-        f.write("\n" + "=" * 60 + "\n")
-        f.write("前 5 名試驗結果\n")
-        f.write("=" * 60 + "\n\n")
+        # 前 10 名試驗結果
+        f.write("\n" + "=" * 80 + "\n")
+        f.write("前 10 名試驗結果\n")
+        f.write("=" * 80 + "\n\n")
 
-        # 取得前 5 名試驗
-        best_trials = tuner.oracle.get_best_trials(num_trials=5)
+        best_trials = tuner.oracle.get_best_trials(num_trials=min(10, stats['total_trials']))
         for i, trial in enumerate(best_trials, 1):
-            f.write(f"Trial {i}:\n")
-            f.write(f"  - ID: {trial.trial_id}\n")
-            f.write(f"  - 驗證損失: {trial.score:.4f}\n")
-            f.write(f"  - 驗證準確度: {trial.metrics.get_best_value('val_accuracy'):.2%}\n")
-            f.write(f"  - 超參數: {trial.hyperparameters.values}\n\n")
+            f.write(f"Rank {i} - Trial {trial.trial_id}:\n")
+            f.write(f"  驗證損失: {trial.score:.4f}\n")
+            f.write(f"  驗證準確度: {trial.metrics.get_best_value('val_accuracy'):.2%}\n")
+            f.write(f"  超參數:\n")
+            for key, value in trial.hyperparameters.values.items():
+                f.write(f"    - {key}: {value}\n")
+            f.write("\n")
+
+        f.write("=" * 80 + "\n")
 
     logging.info(f"調整結果已儲存至: {output_file}")
+
+
+def compare_with_baseline(
+    tuned_model: "keras.Model",
+    baseline_model_path: str,
+    X_test: "np.ndarray",
+    y_test: "np.ndarray",
+    logger: logging.Logger = None,
+) -> dict:
+    """
+    比較調整後的模型與基準模型
+
+    Args:
+        tuned_model: 調整後的模型
+        baseline_model_path: 基準模型檔案路徑
+        X_test: 測試集輸入
+        y_test: 測試集目標
+        logger: Logger 實例（可選）
+
+    Returns:
+        dict: 比較結果
+            - baseline_test_loss: 基準模型測試損失
+            - baseline_test_accuracy: 基準模型測試準確度
+            - tuned_test_loss: 調整模型測試損失
+            - tuned_test_accuracy: 調整模型測試準確度
+            - loss_improvement: 損失改善值（負數表示改善）
+            - accuracy_improvement: 準確度改善值（正數表示改善）
+            - loss_improvement_percent: 損失改善百分比
+            - accuracy_improvement_percent: 準確度改善百分比
+            - is_better: 調整模型是否優於基準模型
+
+    Example:
+        >>> result = compare_with_baseline(
+        ...     tuned_model, "models/baseline.h5",
+        ...     X_test, y_test, logger
+        ... )
+        >>> print(f"準確度改善: {result['accuracy_improvement_percent']:.2f}%")
+    """
+    if keras is None:
+        raise ImportError("TensorFlow/Keras 未安裝")
+
+    if logger is None:
+        logger = logging.getLogger(__name__)
+
+    # 載入基準模型
+    try:
+        baseline_model = keras.models.load_model(baseline_model_path)
+        logger.info(f"✅ 基準模型已載入: {baseline_model_path}")
+    except Exception as e:
+        logger.error(f"❌ 基準模型載入失敗: {e}")
+        raise
+
+    # 評估基準模型
+    logger.info("評估基準模型...")
+    baseline_loss, baseline_accuracy = baseline_model.evaluate(X_test, y_test, verbose=0)
+    logger.info(f"  基準模型 - 測試損失: {baseline_loss:.4f}, 測試準確度: {baseline_accuracy:.2%}")
+
+    # 評估調整模型
+    logger.info("評估調整模型...")
+    tuned_loss, tuned_accuracy = tuned_model.evaluate(X_test, y_test, verbose=0)
+    logger.info(f"  調整模型 - 測試損失: {tuned_loss:.4f}, 測試準確度: {tuned_accuracy:.2%}")
+
+    # 計算改善幅度
+    loss_improvement = tuned_loss - baseline_loss  # 負數表示改善
+    accuracy_improvement = tuned_accuracy - baseline_accuracy  # 正數表示改善
+
+    loss_improvement_percent = (loss_improvement / baseline_loss) * 100 if baseline_loss != 0 else 0
+    accuracy_improvement_percent = (accuracy_improvement / baseline_accuracy) * 100 if baseline_accuracy != 0 else 0
+
+    # 判斷是否更好（損失更低 AND 準確度更高，或準確度顯著提升）
+    is_better = (tuned_loss < baseline_loss and tuned_accuracy >= baseline_accuracy) or \
+                (tuned_accuracy > baseline_accuracy and tuned_loss <= baseline_loss * 1.05)
+
+    # 顯示比較結果
+    logger.info("\n" + "=" * 80)
+    logger.info("比較結果")
+    logger.info("=" * 80)
+    logger.info(f"損失變化: {loss_improvement:+.4f} ({loss_improvement_percent:+.2f}%)")
+    logger.info(f"準確度變化: {accuracy_improvement:+.4f} ({accuracy_improvement_percent:+.2f}%)")
+
+    if is_better:
+        logger.info("✅ 調整模型優於基準模型")
+    else:
+        logger.info("⚠️ 調整模型未顯著優於基準模型")
+
+    logger.info("=" * 80)
+
+    return {
+        "baseline_test_loss": baseline_loss,
+        "baseline_test_accuracy": baseline_accuracy,
+        "tuned_test_loss": tuned_loss,
+        "tuned_test_accuracy": tuned_accuracy,
+        "loss_improvement": loss_improvement,
+        "accuracy_improvement": accuracy_improvement,
+        "loss_improvement_percent": loss_improvement_percent,
+        "accuracy_improvement_percent": accuracy_improvement_percent,
+        "is_better": is_better,
+    }
 
 
 if __name__ == "__main__":

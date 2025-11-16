@@ -12,6 +12,8 @@
 - ✅ **GPU 加速**: 支援 NVIDIA GPU 訓練，自動降級至 CPU
 - ✅ **日期預測**: 根據指定日期預測未來收盤價區間
 - ✅ **自動配置管理**: 訓練時自動保存模型配置，預測時自動載入正確參數
+- ✅ **時間戳記版本管理**: 每次訓練自動加上時間戳記，永不覆蓋舊模型（v2.1 新增）
+- ✅ **基準模型比較**: 超參數調整時可與基準模型比較，自動生成改善報告（v2.1 新增）
 
 ## 環境需求
 
@@ -189,6 +191,7 @@ python src/cli/train.py \
     --time-steps 60 \
     --epochs 100 \
     --batch-size 32 \
+    --model-name baseline_model \
     --output-dir models/
 ```
 
@@ -198,16 +201,145 @@ python src/cli/train.py \
 - `--time-steps`: 時間窗口大小 (20/40/60/80)
 - `--epochs`: 訓練週期數（建議 100）
 - `--batch-size`: 批次大小（GPU: 32-64, CPU: 16-32）
+- `--model-name`: 模型名稱（預設: baseline_model，會自動加上時間戳記）
 - `--output-dir`: 模型儲存目錄
 
 **執行時間參考**（基於 100 epochs）：
 - GPU 環境: 約 1-2 小時
 - CPU 環境: 約 8-12 小時
 
+**輸出檔案**（自動加上時間戳記）：
+```
+models/baseline_model_20251116_144357.h5              ← 模型檔案
+models/baseline_model_20251116_144357_config.json     ← 配置檔案（含訓練參數）
+models/baseline_model_20251116_144357_scaler.pkl      ← 特徵縮放器
+logs/training_logs/baseline_model_20251116_144357_training_log.csv  ← 訓練日誌
+```
+
+**重要說明**：
+- ✅ 每次訓練會自動加上時間戳記（格式: YYYYMMDD_HHMMSS）
+- ✅ 不會覆蓋舊模型，所有歷史版本都保留
+- ✅ 模型和 scaler 使用相同的時間戳記，方便配對
+- 📝 記下模型路徑以便後續超參數調整時使用
+
 ### 2. 執行超參數調整（進階）
 
+#### 方法 1: 與基準模型比較（推薦）
+
 ```bash
-# 使用 Bayesian 優化搜尋最佳模型配置
+# 使用基準模型進行超參數調整並比較效能
+python src/cli/tune.py \
+    --data-file 19980601-20251111-converted.csv \
+    --max-trials 50 \
+    --epochs-per-trial 50 \
+    --baseline-model models/baseline_model_20251116_151143.h5 \
+    --tuned-model-name best_tuned_model \
+    --tuner-type bayesian \
+    --project-name lstm_stock_tuning_20251116_151143 \
+    --overwrite \
+    --output-dir models/
+```
+
+**調參參數說明**：
+- `--max-trials`: 最大試驗次數（建議 50-100）
+- `--epochs-per-trial`: 每次試驗的訓練週期（建議 50）
+- `--baseline-model`: 基準模型路徑（用於比較，v2.1 新增）
+- `--tuned-model-name`: 調整模型名稱（預設: best_tuned_model，會自動加時間戳記）
+- `--tuner-type`: Tuner 類型
+  * `random`: 隨機搜尋（快速）
+  * `bayesian`: 貝葉斯優化（推薦）
+  * `hyperband`: Hyperband 演算法
+- `--overwrite`: 覆寫先前的試驗紀錄（⚠️ 重要參數，見下方說明）
+- `--project-name`: Tuner 專案名稱（預設: lstm_stock_tuning）
+
+**⚠️ 關於試驗數據緩存機制**：
+
+Keras Tuner 會自動保存所有試驗結果到 `logs/tuning_logs/<project_name>/`。當你再次執行調整時：
+
+- **預設行為（不加 `--overwrite`）**：
+  - ✅ 重複使用之前的試驗結果（不重新訓練）
+  - ✅ 如果 `--max-trials` 更大，只訓練額外的試驗
+  - ⚠️ 這會導致「瞬間完成」的情況
+  - 💡 適用於：想要繼續之前的調整，增加試驗次數
+
+- **加上 `--overwrite` 參數**：
+  - 🔄 完全刪除舊的試驗數據
+  - 🔄 重新開始所有試驗
+  - 💡 適用於：資料更新、參數改變、需要重新訓練
+
+**何時需要使用 `--overwrite`**：
+1. ✅ CSV 資料檔案更新時
+2. ✅ 想要完全重新訓練時
+3. ✅ 修改了模型架構或特徵工程時
+4. ✅ 發現之前的試驗結果有問題時
+
+**範例**：
+```bash
+# 完全重新訓練（清除舊數據）
+python src/cli/tune.py \
+    --data-file updated_data.csv \
+    --max-trials 50 \
+    --baseline-model models/baseline_model_20251116_144357.h5 \
+    --overwrite  # 加上這個參數
+
+# 或使用不同的專案名稱（保留舊數據）
+python src/cli/tune.py \
+    --data-file updated_data.csv \
+    --max-trials 50 \
+    --project-name lstm_stock_tuning_v2  # 使用新名稱
+```
+
+**輸出檔案**（自動加上時間戳記）：
+```
+models/best_tuned_model_20251116_153022.h5                    ← 調整後模型
+models/best_tuned_model_20251116_153022_config.json           ← 配置檔案（含基準模型路徑）
+logs/tuning_logs/tuning_results_20251116_153022.txt           ← 詳細調整結果（前10名）
+logs/tuning_logs/comparison_report_20251116_153022.txt        ← 與基準模型比較報告
+logs/tuning_logs/lstm_stock_tuning/                           ← Keras Tuner 試驗紀錄
+```
+
+**配置檔案範例**（`best_tuned_model_20251116_153022_config.json`）：
+```json
+{
+  "model_file": "models/best_tuned_model_20251116_153022.h5",
+  "feature_set_id": "Set B",
+  "time_steps": 60,
+  "created_at": "2025-11-16 15:30:22",
+  "num_layers": 3,
+  "dropout_rate": 0.2,
+  "learning_rate": 0.0005,
+  "batch_size": 64,
+  "epochs_trained": 50,
+  "tuner_type": "bayesian",
+  "max_trials": 50,
+  "baseline_model": "models/baseline_model_20251116_144357.h5",  ← 記錄基準模型
+  "tuning_timestamp": "20251116_153022",
+  "model_type": "tuned"
+}
+```
+
+**比較報告範例**：
+```
+================================================================================
+模型比較報告
+================================================================================
+
+調整時間: 20251116_153022
+基準模型: models/baseline_model_20251116_144357.h5
+調整模型: models/best_tuned_model_20251116_153022.h5
+
+效能比較（測試集）:
+  基準模型 - 測試準確度: 45.67%
+  調整模型 - 測試準確度: 48.92%
+  準確度改善: +7.12%
+
+✅ 調整模型優於基準模型
+```
+
+#### 方法 2: 僅調整（不比較）
+
+```bash
+# 不指定基準模型，僅進行超參數調整
 python src/cli/tune.py \
     --data-file 19980601-20251111-converted.csv \
     --max-trials 50 \
@@ -216,28 +348,24 @@ python src/cli/tune.py \
     --output-dir models/
 ```
 
-**調參參數說明**：
-- `--max-trials`: 最大試驗次數（建議 50-100）
-- `--epochs-per-trial`: 每次試驗的訓練週期（建議 50）
-- `--tuner-type`: Tuner 類型
-  * `random`: 隨機搜尋（快速）
-  * `bayesian`: 貝葉斯優化（推薦）
-  * `hyperband`: Hyperband 演算法
-
 **執行時間參考**（50 trials, 50 epochs/trial）：
 - GPU 環境: 約 6-12 小時
 - CPU 環境: 約 2-3 天
 
-**注意事項**：
-- 調參會自動搜尋最佳特徵集（Set A/B/C）
-- **訓練完成後會自動保存模型配置**（`best_tuned_model_config.json`），預測時可自動載入
+**重要說明**：
+- ✅ 調參會自動搜尋最佳特徵集（Set A/B/C）
+- ✅ 訓練完成後自動保存模型配置（含基準模型路徑）
+- ✅ 自動生成詳細的調整結果和比較報告
+- ✅ 前 10 名試驗結果會完整記錄在日誌中
+- 📊 可隨時查看比較報告了解改善幅度
 - 建議使用 `--overwrite` 參數重新開始，或省略以繼續先前的調參
 - 可使用 `nohup` 在背景執行：
   ```bash
   nohup python src/cli/tune.py \
       --data-file 19980601-20251111-converted.csv \
       --max-trials 50 \
-      --epochs-per-trial 50 > tune.log 2>&1 &
+      --epochs-per-trial 50 \
+      --baseline-model models/baseline_model_20251116_144357.h5 > tune.log 2>&1 &
   ```
 
 ### 3. 執行預測
@@ -316,27 +444,52 @@ python src/cli/predict.py \
 cd /mnt/d/000-github-repositories/stock-price-prediction-v04
 source venv/bin/activate
 
-# 2. 訓練基準模型（快速驗證）
+# 2. 訓練基準模型
 python src/cli/train.py \
     --data-file 19980601-20251111-converted.csv \
     --feature-set "Set A" \
     --time-steps 60 \
-    --epochs 10 \
-    --batch-size 32
+    --epochs 100 \
+    --batch-size 32 \
+    --model-name baseline_model
 
-# 3. 執行超參數調整（尋找最佳配置）
+# 輸出範例：models/baseline_model_20251116_144357.h5
+# 📝 記下這個路徑！
+
+# 3. 執行超參數調整（與基準模型比較）
 python src/cli/tune.py \
     --data-file 19980601-20251111-converted.csv \
-    --max-trials 20 \
+    --max-trials 50 \
     --epochs-per-trial 50 \
+    --baseline-model models/baseline_model_20251116_144357.h5 \
+    --tuned-model-name best_tuned_model \
     --tuner-type bayesian
 
-# 4. 使用最佳模型進行預測（自動載入配置）
+# 輸出範例：
+# - models/best_tuned_model_20251116_153022.h5
+# - logs/tuning_logs/comparison_report_20251116_153022.txt
+
+# 4. 查看比較報告
+cat logs/tuning_logs/comparison_report_20251116_153022.txt
+
+# 5. 使用最佳模型進行預測（自動載入配置）
 python src/cli/predict.py \
-    --model-file models/best_tuned_model.h5 \
+    --model-file models/best_tuned_model_20251116_153022.h5 \
     --data-file 19980601-20251111-converted.csv \
     --input-date "2024-06-01"
 ```
+
+**或使用自動化腳本**：
+
+```bash
+# Linux/Mac
+bash example_workflow.sh
+
+# Windows
+example_workflow.bat
+```
+
+這會自動執行：訓練基準模型 → 超參數調整 → 生成比較報告
 
 ## 模型配置自動管理
 
@@ -614,13 +767,64 @@ find . -type d -name __pycache__ -exec rm -rf {} +
 
 ## 相關文件
 
+### 核心功能文件
 - [模型配置自動載入指南](MODEL_CONFIG_GUIDE.md) - **重要！如何使用自動配置功能**
+- [時間戳記功能說明](TIMESTAMP_FEATURE.md) - **v2.1 新增！自動版本管理**
+- [超參數調整完整指南](HYPERPARAMETER_TUNING_GUIDE.md) - **v2.1 新增！基準模型比較**
+- [訓練系統改進總結](TRAINING_SYSTEM_IMPROVEMENTS.md) - **v2.1 新增！系統更新說明**
+
+### 環境設置文件
 - [已驗證的環境配置](VERIFIED_ENVIRONMENT.md) - WSL2 GPU 環境設置
 - [WSL2 GPU 快速驗證](WSL2_GPU_QUICK_VERIFY.md) - GPU 設置驗證腳本
+
+### 規格文件
 - [功能規格](specs/001-lstm-stock-prediction/spec.md)
 - [實作計畫](specs/001-lstm-stock-prediction/plan.md)
 - [快速開始指南](specs/001-lstm-stock-prediction/quickstart.md)
 - [資料模型](specs/001-lstm-stock-prediction/data-model.md)
+
+## 版本更新
+
+### v2.1 (2025-11-16) - 時間戳記與基準模型比較
+
+**新增功能**：
+- ✅ **自動時間戳記管理**：訓練和調整時自動加上時間戳記，永不覆蓋舊模型
+- ✅ **基準模型比較**：超參數調整時可指定基準模型進行比較
+- ✅ **詳細日誌記錄**：完整記錄調整過程和前 10 名試驗結果
+- ✅ **自動比較報告**：自動生成模型效能比較報告
+- ✅ **基準模型追蹤**：調整模型配置中記錄基於哪個基準模型
+- ✅ **自動化工作流程腳本**：提供一鍵執行的範例腳本
+
+**修改的檔案**：
+- `src/models/model_builder.py` - 加入時間戳記功能
+- `src/cli/train.py` - 更新模型儲存邏輯
+- `src/cli/tune.py` - 加入基準模型比較功能
+- `src/tuning/hyperparameter_tuner.py` - 加入比較和詳細日誌
+
+**新增文件**：
+- `TIMESTAMP_FEATURE.md` - 時間戳記功能說明
+- `HYPERPARAMETER_TUNING_GUIDE.md` - 超參數調整完整指南
+- `TRAINING_SYSTEM_IMPROVEMENTS.md` - 系統改進總結
+- `example_workflow.sh` / `.bat` - 自動化工作流程腳本
+- `test_timestamp.py` - 功能測試腳本
+
+**破壞性變更**：
+- 無。所有新功能預設啟用，但向後相容
+
+**遷移指南**：
+- 舊模型仍可正常使用
+- 新訓練會自動使用時間戳記
+- 建議查看 `HYPERPARAMETER_TUNING_GUIDE.md` 了解新工作流程
+
+### v2.0 - 模型配置自動管理
+
+**新增功能**：
+- ✅ 訓練時自動保存模型配置
+- ✅ 預測時自動載入正確參數
+- ✅ 配置文件格式化和管理工具
+
+**新增文件**：
+- `MODEL_CONFIG_GUIDE.md` - 配置管理指南
 
 ## 授權
 

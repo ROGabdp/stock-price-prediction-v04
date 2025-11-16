@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from src.utils.gpu_checker import setup_gpu
 from src.utils.logger import setup_logger, log_training_start, log_training_complete, log_dataset_info
+from src.utils.model_config import save_model_config
 from src.data.data_loader import load_csv_data
 from src.data.data_splitter import split_time_series, create_sequences
 from src.features.feature_engineer import prepare_features_and_target
@@ -168,9 +169,9 @@ def main():
             scaler, train_features, val_features, test_features
         )
 
-        # 儲存 scaler
-        scaler_path = Path(args.output_dir) / f"{args.model_name}_scaler.pkl"
-        save_scaler(scaler, str(scaler_path))
+        # 暫時儲存 scaler（稍後會用帶時間戳記的名稱更新）
+        # scaler 會在訓練後取得實際的模型名稱後重新儲存
+        temp_scaler = scaler  # 保留 scaler 物件供稍後使用
 
         # 6. 建立時間序列（滑動窗口）
         logger.info("\n步驟 6/8: 建立時間序列")
@@ -234,20 +235,42 @@ def main():
         best_val_loss = min(history["val_loss"])
         best_val_accuracy = max(history["val_accuracy"])
         training_time = history["training_time"]
+        model_name_with_timestamp = history["model_name"]  # 從 history 取得實際的模型名稱
+
+        # 使用相同的時間戳記儲存 scaler
+        scaler_path = Path(args.output_dir) / f"{model_name_with_timestamp}_scaler.pkl"
+        save_scaler(temp_scaler, str(scaler_path))
+
+        # 儲存模型配置（使用帶時間戳記的名稱）
+        model_file_path = f"{args.output_dir}/{model_name_with_timestamp}.h5"
+        save_model_config(
+            model_path=model_file_path,
+            feature_set_id=args.feature_set,
+            time_steps=args.time_steps,
+            additional_params={
+                "learning_rate": args.learning_rate,
+                "batch_size": args.batch_size,
+                "epochs_trained": args.epochs,
+                "patience": args.patience,
+                "model_type": "baseline",
+            },
+        )
+        logger.info(f"✅ 模型配置已儲存: {args.output_dir}/{model_name_with_timestamp}_config.json")
 
         log_training_complete(
             logger,
             val_loss=best_val_loss,
             val_accuracy=best_val_accuracy,
             training_time=training_time,
-            model_path=f"{args.output_dir}/{args.model_name}.h5",
+            model_path=model_file_path,
         )
 
         logger.info("\n" + "=" * 80)
         logger.info("✅ 訓練流程完成！")
         logger.info(f"   最佳驗證準確度: {best_val_accuracy:.2%}")
         logger.info(f"   測試準確度: {test_accuracy:.2%}")
-        logger.info(f"   模型檔案: {args.output_dir}/{args.model_name}.h5")
+        logger.info(f"   模型檔案: {args.output_dir}/{model_name_with_timestamp}.h5")
+        logger.info(f"   配置檔案: {args.output_dir}/{model_name_with_timestamp}_config.json")
         logger.info(f"   縮放器檔案: {scaler_path}")
         logger.info("=" * 80)
 
