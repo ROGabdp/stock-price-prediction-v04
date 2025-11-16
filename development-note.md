@@ -86,3 +86,108 @@ python -c "import tensorflow as tf; print('GPU 可用:', tf.config.list_physical
 
 /speckit.tasks
 /speckit.implement
+
+
+
+
+> 接下來我如果有了新的資料，想要用不同的data 
+file進行預測，我是不是只要在預測指令內更換檔名即可，不需要重新訓練模型? 
+
+● 不完全正確。這要分兩種情況：
+
+  情況分析
+
+  ❌ 情況 1：新資料是「未來的新記錄」
+
+  如果你的新資料是增加了新的交易日記錄（例如從 20251111 更新到 20251130），那麼：
+
+  不能直接預測，必須重新訓練，因為：
+
+  1. 模型需要最新的序列資料：LSTM 模型使用滑動窗口（例如 60
+  天）來預測，如果資料更新了，模型需要用最新的 60 天資料來建立序列
+  2. Scaler 需要重新擬合：特徵縮放器是基於訓練資料的統計特性，新資料可能改變這些特性
+  3. 預測日期會改變：舊模型是基於舊資料訓練的，預測的基準日期已經過時
+
+  正確流程：
+  # 1. 重新訓練基準模型（使用新資料）
+  python src/cli/train.py \
+      --data-file 19980601-20251130-converted.csv \  # 新資料檔
+      --feature-set "Set A" \
+      --time-steps 60 \
+      --epochs 100 \
+      --batch-size 32 \
+      --model-name baseline_model
+
+  # 輸出：models/baseline_model_20251201_100000.h5
+
+  # 2. （可選）重新調整超參數
+  python src/cli/tune.py \
+      --data-file 19980601-20251130-converted.csv \
+      --max-trials 50 \
+      --baseline-model models/baseline_model_20251201_100000.h5 \
+      --overwrite  # ⚠️ 必須加上！
+
+  # 3. 使用新模型預測
+  python src/cli/predict.py \
+      --model-file models/baseline_model_20251201_100000.h5 \
+      --data-file 19980601-20251130-converted.csv \
+      --input-date "2025-11-30"
+
+  ✅ 情況 2：新資料是「同期間的不同股票/市場」
+
+  如果你的新資料是相同時間範圍但不同標的（例如從台積電換成鴻海），那麼：
+
+  不能直接用舊模型，因為：
+
+  1. 不同股票有不同特性：價格範圍、波動性、成交量都不同
+  2. Scaler 不適用：縮放器是針對特定股票訓練的
+  3. 模型學到的是特定股票的模式：LSTM 學習的是該股票的歷史走勢模式
+
+  必須重新訓練新模型。
+
+  ✅ 情況 3：相同資料，只是想預測不同日期
+
+  如果你的新資料檔案內容完全相同，只是：
+  - 檔名不同
+  - 或想預測不同的歷史日期
+
+  可以直接更換檔名預測：
+
+  # 假設你只是重新命名了檔案
+  python src/cli/predict.py \
+      --model-file models/best_tuned_model_20251116_153022.h5 \
+      --data-file new_filename.csv \  # 內容相同，只是檔名不同
+      --input-date "2024-06-15"  # 預測不同日期
+
+  總結
+
+  | 情況            | 是否需要重新訓練 | 原因                  |
+  |---------------|----------|---------------------|
+  | 資料增加新記錄（時間延長） | ✅ 需要     | 序列需要更新、Scaler 需重新擬合 |
+  | 不同股票/市場       | ✅ 需要     | 不同特性、模式完全不同         |
+  | 相同資料不同檔名      | ❌ 不需要    | 內容相同可直接使用           |
+  | 預測不同歷史日期      | ❌ 不需要    | 只要日期在資料範圍內即可        |
+
+
+
+
+
+
+
+  超參數優化中，中斷的方式
+
+    🎯 快速指令參考
+
+  # 1. 中斷訓練
+  Ctrl + C
+
+  # 2. 取得最佳模型
+  python get_best_from_tuner.py
+
+  # 3. 查看結果
+  cat models/best_tuned_setC_partial_*_config.json
+
+  # 4. 稍後繼續（會從中斷處繼續）
+  python tune_setC_only.py
+
+  現在執行 python get_best_from_tuner.py 就可以取得目前最佳的模型了！🚀
