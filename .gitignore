@@ -30,8 +30,8 @@ env.bak/
 venv.bak/
 
 # 訓練模型與日誌
-models/
-logs/
+/models/
+/logs/
 *.h5
 *.hdf5
 *.pb
